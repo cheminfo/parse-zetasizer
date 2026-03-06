@@ -23,10 +23,10 @@ import { readFileSync } from 'node:fs';
 import { fromText } from 'parse-zetasizer';
 
 const text = readFileSync('zetasizer-export.txt', 'utf8');
-const result = fromText(text);
+const records = fromText(text);
 
-// result.records is an array of measurements
-for (const record of result.records) {
+// records is an array of measurements, one per row
+for (const record of records) {
   // record.arrays contains array data (e.g., Sizes, Intensities)
   console.log(record.arrays.Sizes.data); // Float64Array
   console.log(record.arrays.Sizes.units); // "d.nm"
