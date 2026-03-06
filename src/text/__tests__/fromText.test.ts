@@ -98,6 +98,15 @@ test('parse zeta potential export', () => {
   expect(record?.meta['Conductivity (mS/cm)']).toBe(0.943);
 });
 
+test('accepts Buffer input', () => {
+  const result = fromText(
+    readFileSync(join(import.meta.dirname, 'data', 'particleSize.txt')),
+  );
+
+  expect(result).toHaveLength(3);
+  expect(result[0]?.meta.Type).toBe('Size');
+});
+
 test('array columns without units', () => {
   const result = fromText('X[1]\tX[2]\tX[3]\ndata\n1\t2\t3');
 

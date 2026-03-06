@@ -8,6 +8,8 @@
  */
 
 import { parseString } from 'dynamic-typing';
+import type { TextData } from 'ensure-string';
+import { ensureString } from 'ensure-string';
 
 /**
  * A group of array columns sharing the same prefix (e.g., "Sizes").
@@ -27,6 +29,58 @@ export interface ZetasizerRecord {
   arrays: Record<string, ZetasizerArray>;
   /** Scalar metadata columns, keyed by the original header name. */
   meta: Record<string, boolean | number | string>;
+}
+
+/**
+ * Parse a Zetasizer tab-separated text export into structured records.
+ *
+ * The parser dynamically discovers columns from the header row:
+ * - Columns matching `Name[N] (units)` are grouped into array data.
+ * - All other columns become scalar metadata entries.
+ * @param data - The raw content of the Zetasizer export file (string, ArrayBuffer, or typed array)
+ * @returns Array of parsed measurement records
+ */
+export function fromText(data: TextData): ZetasizerRecord[] {
+  const text = ensureString(data);
+  const lines = text.split(/\r?\n/).filter((line) => line.trim() !== '');
+  if (lines.length < 2) {
+    return [];
+  }
+
+  const headerLine = lines[0];
+  if (!headerLine) {
+    return [];
+  }
+  const headers = headerLine.split('\t');
+  const { arrayGroups, scalarIndices } = classifyColumns(headers);
+
+  const records: ZetasizerRecord[] = [];
+
+  for (let i = 1; i < lines.length; i++) {
+    const line = lines[i];
+    if (!line) continue;
+    const values = line.split('\t');
+
+    const arrays: Record<string, ZetasizerArray> = {};
+    for (const group of arrayGroups) {
+      arrays[group.name] = {
+        data: extractFloatArray(values, group.start, group.count),
+        units: group.units,
+      };
+    }
+
+    const meta: Record<string, boolean | number | string> = {};
+    for (const [name, index] of scalarIndices) {
+      const raw = values[index] ?? '';
+      if (raw !== '') {
+        meta[name] = parseString(raw);
+      }
+    }
+
+    records.push({ arrays, meta });
+  }
+
+  return records;
 }
 
 interface ArrayColumnGroup {
@@ -113,55 +167,4 @@ function extractFloatArray(
     result[i] = Number(values[start + i]);
   }
   return result;
-}
-
-/**
- * Parse a Zetasizer tab-separated text export into structured records.
- *
- * The parser dynamically discovers columns from the header row:
- * - Columns matching `Name[N] (units)` are grouped into array data.
- * - All other columns become scalar metadata entries.
- * @param text - The raw text content of the Zetasizer export file
- * @returns Array of parsed measurement records
- */
-export function fromText(text: string): ZetasizerRecord[] {
-  const lines = text.split(/\r?\n/).filter((line) => line.trim() !== '');
-  if (lines.length < 2) {
-    return [];
-  }
-
-  const headerLine = lines[0];
-  if (!headerLine) {
-    return [];
-  }
-  const headers = headerLine.split('\t');
-  const { arrayGroups, scalarIndices } = classifyColumns(headers);
-
-  const records: ZetasizerRecord[] = [];
-
-  for (let i = 1; i < lines.length; i++) {
-    const line = lines[i];
-    if (!line) continue;
-    const values = line.split('\t');
-
-    const arrays: Record<string, ZetasizerArray> = {};
-    for (const group of arrayGroups) {
-      arrays[group.name] = {
-        data: extractFloatArray(values, group.start, group.count),
-        units: group.units,
-      };
-    }
-
-    const meta: Record<string, boolean | number | string> = {};
-    for (const [name, index] of scalarIndices) {
-      const raw = values[index] ?? '';
-      if (raw !== '') {
-        meta[name] = parseString(raw);
-      }
-    }
-
-    records.push({ arrays, meta });
-  }
-
-  return records;
 }

@@ -35,7 +35,8 @@
     "tsc-build": "tsc --project tsconfig.build.json"
   },
   "dependencies": {
-    "dynamic-typing": "^2.0.0"
+    "dynamic-typing": "^2.0.0",
+    "ensure-string": "^2.0.0"
   },
   "devDependencies": {
     "@types/node": "^25.3.3",
