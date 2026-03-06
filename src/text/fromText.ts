@@ -29,14 +29,6 @@ export interface ZetasizerRecord {
   meta: Record<string, boolean | number | string>;
 }
 
-/**
- * The result of parsing a Zetasizer text export.
- */
-export interface ZetasizerFile {
-  /** One record per data row in the file. */
-  records: ZetasizerRecord[];
-}
-
 interface ArrayColumnGroup {
   /** Header prefix (e.g., "Sizes"). */
   name: string;
@@ -130,17 +122,17 @@ function extractFloatArray(
  * - Columns matching `Name[N] (units)` are grouped into array data.
  * - All other columns become scalar metadata entries.
  * @param text - The raw text content of the Zetasizer export file
- * @returns Parsed ZetasizerFile with one record per measurement
+ * @returns Array of parsed measurement records
  */
-export function fromText(text: string): ZetasizerFile {
+export function fromText(text: string): ZetasizerRecord[] {
   const lines = text.split(/\r?\n/).filter((line) => line.trim() !== '');
   if (lines.length < 2) {
-    return { records: [] };
+    return [];
   }
 
   const headerLine = lines[0];
   if (!headerLine) {
-    return { records: [] };
+    return [];
   }
   const headers = headerLine.split('\t');
   const { arrayGroups, scalarIndices } = classifyColumns(headers);
@@ -171,5 +163,5 @@ export function fromText(text: string): ZetasizerFile {
     records.push({ arrays, meta });
   }
 
-  return { records };
+  return records;
 }
