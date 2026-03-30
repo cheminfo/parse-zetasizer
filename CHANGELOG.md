@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.1](https://github.com/cheminfo/parse-zetasizer/compare/v1.1.0...v1.1.1) (2026-03-30)
+
+
+### Bug Fixes
+
+* extract distribution parameters from meta and flatten record structure ([be9214a](https://github.com/cheminfo/parse-zetasizer/commit/be9214a050d06a999c8fa9e18ca714a066779fd8))
+
 ## [1.1.0](https://github.com/cheminfo/parse-zetasizer/compare/v1.0.0...v1.1.0) (2026-03-30)
 
 
