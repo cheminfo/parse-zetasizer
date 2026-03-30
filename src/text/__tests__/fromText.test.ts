@@ -1,5 +1,6 @@
 import { expect, test } from 'vitest';
 
+import type { ZetasizerArray } from '../fromText.ts';
 import { fromText } from '../fromText.ts';
 
 test('empty input returns empty array', () => {
@@ -23,8 +24,8 @@ test('array columns without units', () => {
 
   expect(result).toHaveLength(2);
 
-  const arrays = result[1]?.arrays;
+  const x = result[1]?.X as ZetasizerArray | undefined;
 
-  expect(arrays?.X?.units).toBe('');
-  expect(arrays?.X?.data).toStrictEqual(new Float64Array([1, 2, 3]));
+  expect(x?.units).toBe('');
+  expect(x?.data).toStrictEqual(new Float64Array([1, 2, 3]));
 });

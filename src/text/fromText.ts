@@ -16,6 +16,16 @@ import type { TextData } from 'ensure-string';
 import { ensureString } from 'ensure-string';
 
 /**
+ * A peak detected in a distribution, with its position and width.
+ */
+export interface ZetasizerDistribution {
+  /** Peak position (e.g., in d.nm for size distributions). */
+  peak: number;
+  /** Peak width (e.g., in d.nm for size distributions). */
+  width: number;
+}
+
+/**
  * A group of array columns sharing the same prefix (e.g., "Sizes").
  */
 export interface ZetasizerArray {
@@ -23,16 +33,23 @@ export interface ZetasizerArray {
   data: Float64Array;
   /** Units extracted from the header (e.g., "d.nm", "Percent"), or empty. */
   units: string;
+  /** Mean value for this distribution, if available. */
+  mean?: number;
+  /** Non-zero peaks detected in this distribution, if available. */
+  distributions?: ZetasizerDistribution[];
 }
 
 /**
  * A single measurement record parsed from one data row.
+ *
+ * Array data columns (e.g., "Sizes", "Intensities") are stored directly
+ * as properties alongside `meta`.
  */
 export interface ZetasizerRecord {
-  /** Array data columns, keyed by header prefix (e.g., "Sizes", "Intensities"). */
-  arrays: Record<string, ZetasizerArray>;
   /** Scalar metadata columns, keyed by the original header name. */
   meta: Record<string, boolean | number | string>;
+  /** Array data columns, keyed by header prefix (e.g., "Sizes", "Intensities"). */
+  [key: string]: ZetasizerArray | Record<string, boolean | number | string>;
 }
 
 /**
@@ -68,9 +85,9 @@ export function fromText(data: TextData): ZetasizerRecord[] {
       if (!line) continue;
       const values = line.split('\t');
 
-      const arrays: Record<string, ZetasizerArray> = {};
+      const record: ZetasizerRecord = { meta: {} };
       for (const group of arrayGroups) {
-        arrays[group.name] = {
+        record[group.name] = {
           data: extractFloatArray(values, group.start, group.count),
           units: group.units,
         };
@@ -83,14 +100,17 @@ export function fromText(data: TextData): ZetasizerRecord[] {
           meta[name] = parseString(raw);
         }
       }
+      record.meta = meta;
 
-      records.push({ arrays, meta });
+      records.push(record);
     }
 
     sectionResults.push(records);
   }
 
-  return mergeSections(sectionResults);
+  const records = mergeSections(sectionResults);
+  extractDistributionParameters(records);
+  return records;
 }
 
 /**
@@ -220,13 +240,21 @@ function mergeSections(sectionResults: ZetasizerRecord[][]): ZetasizerRecord[] {
   const merged: ZetasizerRecord[] = [];
 
   for (let i = 0; i < maxLength; i++) {
-    const record: ZetasizerRecord = { arrays: {}, meta: {} };
+    const record: ZetasizerRecord = { meta: {} };
 
     for (const section of sectionResults) {
       const sectionRecord = section[i];
       if (!sectionRecord) continue;
-      Object.assign(record.arrays, sectionRecord.arrays);
-      Object.assign(record.meta, sectionRecord.meta);
+      for (const [key, value] of Object.entries(sectionRecord)) {
+        if (key === 'meta') {
+          Object.assign(
+            record.meta,
+            value as Record<string, boolean | number | string>,
+          );
+        } else {
+          record[key] = value;
+        }
+      }
     }
 
     merged.push(record);
@@ -252,4 +280,136 @@ function extractFloatArray(
     result[i] = Number(values[start + i]);
   }
   return result;
+}
+
+const MEAN_PATTERN = /^(.+?)\s+Mean\s+\(/i;
+const WIDTH_PEAK_PATTERN = /^(.+?)\s+Width\s+Peak\s+(\d+)\s+\(/i;
+const PEAK_PATTERN = /^(.+?)\s+Peak\s+(\d+)\s+\(/i;
+
+/**
+ * Find the array name that matches a given prefix (e.g., "Intensity" → "Intensities").
+ * @param record - The record to search for matching array entries
+ * @param prefix - The prefix to match (e.g., "Intensity")
+ * @returns The matching array name, or undefined
+ */
+function findArrayByPrefix(
+  record: ZetasizerRecord,
+  prefix: string,
+): string | undefined {
+  const lowerPrefix = prefix.toLowerCase();
+  // Handle y→ies pluralization (e.g., "Intensity" → "Intensities")
+  const altPrefix = lowerPrefix.replace(/y$/, 'i');
+  return Object.keys(record)
+    .filter((key) => key !== 'meta')
+    .find((name) => {
+      const lowerName = name.toLowerCase();
+      return (
+        lowerName.startsWith(lowerPrefix) || lowerName.startsWith(altPrefix)
+      );
+    });
+}
+
+/**
+ * Get or create a peak entry in the peak data map.
+ * @param peakData - Map of array name to peak number to peak data
+ * @param arrayName - The array name to look up
+ * @param peakNumber - The peak number to look up
+ * @returns The peak entry object
+ */
+function getOrCreatePeak(
+  peakData: Map<string, Map<number, { position?: number; width?: number }>>,
+  arrayName: string,
+  peakNumber: number,
+): { position?: number; width?: number } {
+  let peaks = peakData.get(arrayName);
+  if (!peaks) {
+    peaks = new Map();
+    peakData.set(arrayName, peaks);
+  }
+  let entry = peaks.get(peakNumber);
+  if (!entry) {
+    entry = {};
+    peaks.set(peakNumber, entry);
+  }
+  return entry;
+}
+
+/**
+ * Extract distribution-specific parameters (mean, peaks, widths) from scalar
+ * metadata and attach them to their corresponding array entries.
+ *
+ * Matched keys are removed from `meta`. Peaks where both position and width
+ * are zero are filtered out.
+ * @param records - The parsed records to process in-place
+ */
+function extractDistributionParameters(records: ZetasizerRecord[]): void {
+  for (const record of records) {
+    const extractedKeys = new Set<string>();
+    const peakData = new Map<
+      string,
+      Map<number, { position?: number; width?: number }>
+    >();
+
+    for (const [key, value] of Object.entries(record.meta)) {
+      if (typeof value !== 'number') continue;
+
+      let match = MEAN_PATTERN.exec(key);
+      if (match) {
+        const prefix = match[1] ?? '';
+        const arrayName = findArrayByPrefix(record, prefix);
+        const arrayEntry = arrayName
+          ? (record[arrayName] as ZetasizerArray | undefined)
+          : undefined;
+        if (arrayEntry) {
+          arrayEntry.mean = value;
+          extractedKeys.add(key);
+        }
+        continue;
+      }
+
+      match = WIDTH_PEAK_PATTERN.exec(key);
+      if (match) {
+        const prefix = match[1] ?? '';
+        const peakNumber = Number(match[2]);
+        const arrayName = findArrayByPrefix(record, prefix);
+        if (arrayName) {
+          getOrCreatePeak(peakData, arrayName, peakNumber).width = value;
+          extractedKeys.add(key);
+        }
+        continue;
+      }
+
+      match = PEAK_PATTERN.exec(key);
+      if (match) {
+        const prefix = match[1] ?? '';
+        const peakNumber = Number(match[2]);
+        const arrayName = findArrayByPrefix(record, prefix);
+        if (arrayName) {
+          getOrCreatePeak(peakData, arrayName, peakNumber).position = value;
+          extractedKeys.add(key);
+        }
+        continue;
+      }
+    }
+
+    for (const [arrayName, peaks] of peakData) {
+      const distributions = [...peaks.entries()]
+        .toSorted((a, b) => a[0] - b[0])
+        .map(([, p]) => ({ peak: p.position ?? 0, width: p.width ?? 0 }))
+        .filter((p) => p.peak !== 0 || p.width !== 0);
+
+      const arrayEntry = record[arrayName] as ZetasizerArray | undefined;
+      if (distributions.length > 0 && arrayEntry) {
+        arrayEntry.distributions = distributions;
+      }
+    }
+
+    const filteredMeta: Record<string, boolean | number | string> = {};
+    for (const [key, value] of Object.entries(record.meta)) {
+      if (!extractedKeys.has(key)) {
+        filteredMeta[key] = value;
+      }
+    }
+    record.meta = filteredMeta;
+  }
 }
