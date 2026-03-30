@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.2](https://github.com/cheminfo/parse-zetasizer/compare/v1.1.1...v1.1.2) (2026-03-30)
+
+
+### Bug Fixes
+
+* remove distribution extraction from parser ([1ee1d5d](https://github.com/cheminfo/parse-zetasizer/commit/1ee1d5d1e1f417558e8b25c3e3237676b915cdfa))
+
 ## [1.1.1](https://github.com/cheminfo/parse-zetasizer/compare/v1.1.0...v1.1.1) (2026-03-30)
 
 
