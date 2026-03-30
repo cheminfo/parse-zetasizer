@@ -5,6 +5,10 @@
  * and scalar metadata columns from the header row. This makes it work
  * regardless of which fields the user selected for export or which
  * instrument model produced the file.
+ *
+ * Some exports contain multiple sections (e.g., a summary table followed
+ * by a distribution table). The parser detects new header rows and merges
+ * corresponding records from each section.
  */
 
 import { parseString } from 'dynamic-typing';
@@ -37,6 +41,10 @@ export interface ZetasizerRecord {
  * The parser dynamically discovers columns from the header row:
  * - Columns matching `Name[N] (units)` are grouped into array data.
  * - All other columns become scalar metadata entries.
+ *
+ * Files may contain multiple sections with different headers. Each new
+ * header row starts a new section, and records are merged across sections
+ * in order.
  * @param data - The raw content of the Zetasizer export file (string, ArrayBuffer, or typed array)
  * @returns Array of parsed measurement records
  */
@@ -47,40 +55,90 @@ export function fromText(data: TextData): ZetasizerRecord[] {
     return [];
   }
 
-  const headerLine = lines[0];
-  if (!headerLine) {
-    return [];
-  }
-  const headers = headerLine.split('\t');
-  const { arrayGroups, scalarIndices } = classifyColumns(headers);
+  const sections = splitSections(lines);
+  const sectionResults: ZetasizerRecord[][] = [];
 
-  const records: ZetasizerRecord[] = [];
+  for (const section of sections) {
+    const headers = section[0]?.split('\t') ?? [];
+    const { arrayGroups, scalarIndices } = classifyColumns(headers);
+    const records: ZetasizerRecord[] = [];
 
-  for (let i = 1; i < lines.length; i++) {
-    const line = lines[i];
-    if (!line) continue;
-    const values = line.split('\t');
+    for (let i = 1; i < section.length; i++) {
+      const line = section[i];
+      if (!line) continue;
+      const values = line.split('\t');
 
-    const arrays: Record<string, ZetasizerArray> = {};
-    for (const group of arrayGroups) {
-      arrays[group.name] = {
-        data: extractFloatArray(values, group.start, group.count),
-        units: group.units,
-      };
-    }
-
-    const meta: Record<string, boolean | number | string> = {};
-    for (const [name, index] of scalarIndices) {
-      const raw = values[index] ?? '';
-      if (raw !== '') {
-        meta[name] = parseString(raw);
+      const arrays: Record<string, ZetasizerArray> = {};
+      for (const group of arrayGroups) {
+        arrays[group.name] = {
+          data: extractFloatArray(values, group.start, group.count),
+          units: group.units,
+        };
       }
+
+      const meta: Record<string, boolean | number | string> = {};
+      for (const [name, index] of scalarIndices) {
+        const raw = values[index] ?? '';
+        if (raw !== '') {
+          meta[name] = parseString(raw);
+        }
+      }
+
+      records.push({ arrays, meta });
     }
 
-    records.push({ arrays, meta });
+    sectionResults.push(records);
   }
 
-  return records;
+  return mergeSections(sectionResults);
+}
+
+/**
+ * Split lines into sections, each starting with a header row.
+ *
+ * The first line is always treated as a header. Subsequent lines that
+ * contain array column patterns (e.g., `Name[1]`) are detected as new
+ * header rows, starting a new section.
+ * @param lines - Non-empty lines from the file
+ * @returns Array of sections, each being an array of lines (header + data)
+ */
+function splitSections(lines: string[]): string[][] {
+  const sections: string[][] = [];
+  let current: string[] = [];
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i] ?? '';
+    if (i === 0) {
+      current.push(line);
+    } else if (isHeaderLine(line)) {
+      if (current.length > 0) {
+        sections.push(current);
+      }
+      current = [line];
+    } else {
+      current.push(line);
+    }
+  }
+
+  if (current.length > 0) {
+    sections.push(current);
+  }
+
+  return sections;
+}
+
+const ARRAY_HEADER_PATTERN =
+  /^(?<name>.+?)\[(?:\d+)]\s*(?:\((?<units>.+?)\))?$/;
+
+/**
+ * Check if a line looks like a header row by testing whether any
+ * tab-separated value matches the array column pattern.
+ * @param line - A line from the file
+ * @returns True if the line appears to be a header row
+ */
+function isHeaderLine(line: string): boolean {
+  const fields = line.split('\t');
+  return fields.some((field) => ARRAY_HEADER_PATTERN.test(field));
 }
 
 interface ArrayColumnGroup {
@@ -93,9 +151,6 @@ interface ArrayColumnGroup {
   /** Number of consecutive columns in this group. */
   count: number;
 }
-
-const ARRAY_HEADER_PATTERN =
-  /^(?<name>.+?)\[(?:\d+)]\s*(?:\((?<units>.+?)\))?$/;
 
 /**
  * Scan headers to identify groups of array columns and scalar columns.
@@ -148,6 +203,36 @@ function classifyColumns(headers: string[]): {
   }
 
   return { arrayGroups, scalarIndices };
+}
+
+/**
+ * Merge records from multiple sections by index. Records at the same
+ * position across sections are combined, with later sections' metadata
+ * and arrays added to earlier ones.
+ * @param sectionResults - Array of record arrays, one per section
+ * @returns Merged array of records
+ */
+function mergeSections(sectionResults: ZetasizerRecord[][]): ZetasizerRecord[] {
+  if (sectionResults.length === 0) return [];
+  if (sectionResults.length === 1) return sectionResults[0] ?? [];
+
+  const maxLength = Math.max(...sectionResults.map((s) => s.length));
+  const merged: ZetasizerRecord[] = [];
+
+  for (let i = 0; i < maxLength; i++) {
+    const record: ZetasizerRecord = { arrays: {}, meta: {} };
+
+    for (const section of sectionResults) {
+      const sectionRecord = section[i];
+      if (!sectionRecord) continue;
+      Object.assign(record.arrays, sectionRecord.arrays);
+      Object.assign(record.meta, sectionRecord.meta);
+    }
+
+    merged.push(record);
+  }
+
+  return merged;
 }
 
 /**
