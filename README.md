@@ -27,9 +27,13 @@ const records = fromText(text);
 
 // records is an array of measurements, one per row
 for (const record of records) {
-  // record.arrays contains array data (e.g., Sizes, Intensities)
-  console.log(record.arrays.Sizes.data); // Float64Array
-  console.log(record.arrays.Sizes.units); // "d.nm"
+  // Array data (Sizes, Intensities, etc.) is directly on the record
+  console.log(record.Sizes.data); // Float64Array
+  console.log(record.Sizes.units); // "d.nm"
+
+  // Distribution parameters are attached when available
+  console.log(record.Intensities.mean); // e.g., 116.1
+  console.log(record.Intensities.distributions); // [{ peak: 116.1, width: 32.94 }]
 
   // record.meta contains scalar metadata
   console.log(record.meta['Sample Name']);
