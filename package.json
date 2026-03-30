@@ -1,6 +1,6 @@
 {
   "name": "parse-zetasizer",
-  "version": "1.1.2",
+  "version": "1.2.0",
   "license": "MIT",
   "description": "Parse text exports from Malvern Panalytical Zetasizer instruments",
   "keywords": [

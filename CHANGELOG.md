@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.0](https://github.com/cheminfo/parse-zetasizer/compare/v1.1.2...v1.2.0) (2026-03-30)
+
+
+### Features
+
+* add getArray helper to retrieve typed arrays from records ([c28471d](https://github.com/cheminfo/parse-zetasizer/commit/c28471defd4b9a51a4339ed6c9ad13747b6b3d5e))
+
 ## [1.1.2](https://github.com/cheminfo/parse-zetasizer/compare/v1.1.1...v1.1.2) (2026-03-30)
 
 
